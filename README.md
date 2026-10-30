@@ -3,8 +3,7 @@ title: NeuroForge AI
 emoji: 🧠
 colorFrom: blue
 colorTo: purple
-sdk: streamlit
-sdk_version: "1.39.0"
+sdk: gradio
 app_file: app.py
 pinned: false
 python_version: "3.11"
@@ -24,7 +23,7 @@ NeuroForge turns a user goal into a structured plan, asks a Hugging Face instruc
 User goal
    |
    v
-FastAPI / Streamlit interface
+Gradio interface / FastAPI API
    |
    v
 Agent orchestrator ---- SQLite memory
@@ -43,9 +42,11 @@ Evidence-backed result + execution trace
 
 1. Create a Python 3.11+ environment.
 2. Install dependencies: `pip install -r requirements.txt`
-3. Copy `.env.example` to `.env` and set `HF_TOKEN`.
-4. Run the UI: `streamlit run app.py`
+3. Set `HF_TOKEN` as an environment variable (or in a local `.env` file).
+4. Launch the Gradio interface: `python app.py`
 5. Or run the API: `uvicorn neuroforge.api:app --reload`
+
+On Hugging Face Spaces, the Gradio SDK launches `app.py` automatically. Add `HF_TOKEN` under the Space's Settings → Variables and secrets. Never commit access tokens.
 
 The default model is configurable with `HF_MODEL`. The selected model must be available through your Hugging Face Inference Provider account. Provider availability, model routing and usage limits can change; check the Hugging Face model page and account settings.
 
@@ -72,7 +73,7 @@ The default model is configurable with `HF_MODEL`. The selected model must be av
 - `neuroforge/memory.py`: SQLite run history
 - `neuroforge/schemas.py`: typed request and response models
 - `neuroforge/api.py`: FastAPI service
-- `app.py`: Streamlit interface
+- `app.py`: Gradio interface
 - `tests/`: automated tests
 
 ## Security principles
@@ -95,11 +96,11 @@ pytest
 - [x] Hugging Face model integration
 - [x] Bounded tool-using agent loop
 - [x] Validated tools and SQLite run history
-- [x] API and interactive UI
+- [x] API and interactive Gradio UI
+- [x] GitHub Actions sync workflow for Hugging Face Spaces
 - [ ] Model and prompt benchmark suite
 - [ ] Retrieval-augmented technical document analysis
 - [ ] Human approval workflow for external actions
-- [ ] Hugging Face Spaces deployment
 
 ## License
 
