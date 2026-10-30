@@ -1,3 +1,15 @@
+---
+title: NeuroForge AI
+emoji: 🧠
+colorFrom: blue
+colorTo: purple
+sdk: streamlit
+sdk_version: "1.39.0"
+app_file: app.py
+pinned: false
+python_version: "3.11"
+---
+
 # NeuroForge AI
 
 **An open-source, tool-using autonomous AI agent powered by Hugging Face models.**
