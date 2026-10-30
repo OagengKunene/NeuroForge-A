@@ -1,7 +1,10 @@
 """Hugging Face Inference Providers client."""
 import json
 import os
+from dotenv import load_dotenv
 from huggingface_hub import InferenceClient
+
+load_dotenv()
 
 
 class HuggingFaceModel:
