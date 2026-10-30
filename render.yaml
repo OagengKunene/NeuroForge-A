@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: neuroforge-ai
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: python app.py
+    healthCheckPath: /
+    autoDeploy: true
+    envVars:
+      - key: HF_TOKEN
+        sync: false
+      - key: HF_MODEL
+        value: Qwen/Qwen2.5-7B-Instruct
+      - key: MAX_AGENT_STEPS
+        value: "4"
