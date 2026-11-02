@@ -20,7 +20,7 @@ tags:
 
 # NeuroForge AI
 
-A technical problem-solving workspace for Kunene. A small instruction model runs directly on Hugging Face ZeroGPU, selects validated tools, and explains the results with an observable execution trace.
+A technical problem-solving workspace. A small instruction model runs directly on Hugging Face ZeroGPU, selects validated tools, and explains the results with an observable execution trace.
 
 **[Open the app](https://huggingface.co/spaces/Oageng/NeuroForge-AI)**
 
