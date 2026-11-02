@@ -38,7 +38,9 @@ The default model is **Qwen/Qwen2.5-1.5B-Instruct**, pinned to revision `989aa79
 
 Gradio task → ZeroGPU allocation → local Qwen inference → validated decision → registered tool → observation → final response and verified evidence.
 
-The GPU handler registered with Gradio is decorated with `@spaces.GPU(duration=90)`. Model weights are loaded and moved to CUDA at application startup, before requests are served, following the [ZeroGPU model-loading guidance](https://huggingface.co/docs/hub/spaces-zerogpu).
+The GPU handler uses `@spaces.GPU` with a duration calculated from the call budget: 30–90 seconds, with 45 seconds for the default three calls. Model weights are loaded and moved to CUDA at application startup, before requests are served, following the [ZeroGPU model-loading guidance](https://huggingface.co/docs/hub/spaces-zerogpu).
+
+The model uses Qwen's native function-calling chat template. The adapter converts function calls into the project's validated internal schema, and final explanations use natural language. This avoids requiring a small language model to imitate a custom response protocol.
 
 The app downloads the public model and runs it locally in the Space. It does not call a paid Inference Provider and needs no inference API token. The GitHub deployment token is used only by the publishing workflow.
 
@@ -109,6 +111,8 @@ python -m pytest -q
 ```
 
 Tests use fake model decisions and do not download model weights or allocate a GPU. They cover tool calculations, malformed/nonfinite output, recovery, exact model-call budgets, failed runs, isolated session histories, and construction of the pinned Gradio UI. Live GPU inference is a separate deployment check.
+
+After successful deployment, **Check NeuroForge GPU examples** submits two fixed public examples through the authenticated Gradio API and verifies their tool results. This consumes the publisher account's ZeroGPU allowance. The check uses only its own example responses; it does not collect private Space runtime logs or other visitors' histories. It can also be run manually from GitHub Actions.
 
 ## Files
 

@@ -47,3 +47,9 @@ def test_successful_gpu_request_keeps_the_real_task_path(monkeypatch):
     monkeypatch.setattr(app, "_gpu_task", gpu)
     assert app.run_task("A technical task", 3, []) == expected
     assert len(calls) == 1
+
+
+def test_gpu_duration_fits_the_call_budget():
+    assert app.gpu_duration("task", 3, []) == 45
+    assert app.gpu_duration("task", 6, []) == 90
+    assert app.gpu_duration("task", -1, []) == 30

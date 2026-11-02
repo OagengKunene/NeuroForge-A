@@ -43,7 +43,14 @@ def present_run(goal, max_steps, history, model):
     return result.answer, verified, status, trace, updated, updated
 
 
-@spaces.GPU(duration=90)
+def gpu_duration(goal, max_steps, history):
+    try:
+        return min(90, max(30, int(max_steps) * 15))
+    except (TypeError, ValueError):
+        return 30
+
+
+@spaces.GPU(duration=gpu_duration)
 def _gpu_task(goal: str, max_steps: int, history: list):
     """Run the local language model and validated tools on shared ZeroGPU."""
     if _BACKEND is None:
