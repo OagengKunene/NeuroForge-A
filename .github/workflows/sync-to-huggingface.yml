@@ -1,16 +1,57 @@
 name: Sync to Hugging Face Space
 
-on:
+"on":
   push:
     branches: [main]
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   sync:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: Check out GitHub repository
         uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v7.1.0
+        with:
+          python-version: "3.11"
+
+      - name: Install the Hugging Face client
+        run: python -m pip install --disable-pip-version-check "huggingface_hub==2.4.0"
+
+      - name: Use CPU Basic for hosted model inference
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          python - <<'PY'
+          from huggingface_hub import HfApi, SpaceHardware
+          from huggingface_hub.utils import HfHubHTTPError
+
+          api = HfApi()
+          space = "Oageng/NeuroForge-AI"
+          try:
+              runtime = api.get_space_runtime(repo_id=space)
+              requested = runtime.requested_hardware or runtime.hardware
+              if requested != SpaceHardware.CPU_BASIC:
+                  runtime = api.request_space_hardware(
+                      repo_id=space, hardware=SpaceHardware.CPU_BASIC
+                  )
+              print(f"Requested hardware: {runtime.requested_hardware or runtime.hardware}")
+          except HfHubHTTPError as exc:
+              status = exc.response.status_code if exc.response is not None else None
+              if status == 402:
+                  raise SystemExit(
+                      "Hugging Face requires an eligible subscription for this "
+                      "Gradio Space on CPU Basic. No paid hardware was requested."
+                  ) from None
+              raise
+          PY
+
       - name: Sync repository to Hugging Face Space
         uses: huggingface/hub-sync@v0.3.0
         with:

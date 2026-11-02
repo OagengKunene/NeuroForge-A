@@ -7,6 +7,7 @@ sdk: gradio
 app_file: app.py
 pinned: false
 python_version: "3.11"
+suggested_hardware: cpu-basic
 ---
 
 # NeuroForge AI
@@ -47,6 +48,10 @@ Evidence-backed result + execution trace
 5. Or run the API: `uvicorn neuroforge.api:app --reload`
 
 On Hugging Face Spaces, the Gradio SDK launches `app.py` automatically. Add `HF_TOKEN` under the Space's Settings → Variables and secrets. Never commit access tokens.
+
+Use **CPU Basic** hardware for this application. The language model runs through Hugging Face Inference Providers; the Space hosts the interface and agent orchestration, so it does not use a local GPU. Selecting ZeroGPU causes a startup error because the app has no GPU-dependent function.
+
+The GitHub sync workflow requests CPU Basic before publishing. It never selects paid hardware. If Hugging Face requires an eligible subscription to enable CPU Basic for this Gradio Space, the workflow stops with that explanation; it does not purchase or change your plan.
 
 The default model is configurable with `HF_MODEL`. The selected model must be available through your Hugging Face Inference Provider account. Provider availability, model routing and usage limits can change; check the Hugging Face model page and account settings.
 
