@@ -56,5 +56,6 @@ jobs:
               print(json.dumps({"case": name, "verified": verified, "expected_result": expected,
                                 "event_types": [event.get("event") for event in trace]}))
               if not verified:
+                  print(json.dumps({"case": name, "own_test_errors": [event.get("detail", "")[:450] for event in trace if event.get("event") == "model_error"]}))
                   raise SystemExit(1)
           PY
