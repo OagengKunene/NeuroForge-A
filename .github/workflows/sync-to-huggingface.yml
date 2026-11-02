@@ -55,7 +55,6 @@ jobs:
         run: |
           python - <<'PY'
           import time
-          from collections import deque
           from huggingface_hub import HfApi
           api = HfApi()
           space = "Oageng/NeuroForge-AI"
@@ -63,14 +62,10 @@ jobs:
           try:
               runtime = api.wait_for_space(space, timeout=1000, poll_interval=15)
               print(f"Space state: {runtime.stage}")
-          except Exception:
-              for build in (True, False):
-                  print("Build logs:" if build else "Runtime logs:")
-                  try:
-                      for line in deque(api.fetch_space_logs(space, build=build), maxlen=60):
-                          print(line, end="")
-                  except Exception as error:
-                      print(f"Logs unavailable: {type(error).__name__}")
-              raise
+          except Exception as error:
+              raise SystemExit(
+                  f"Space did not become ready ({type(error).__name__}). "
+                  "Review its state in Hugging Face. Private runtime logs were not exported."
+              ) from None
           PY
 

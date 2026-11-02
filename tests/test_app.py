@@ -25,3 +25,25 @@ def test_bad_input_does_not_change_history_or_run_model():
     assert output[2] == "Not started"
     assert output[4] == history
     assert model.calls == 0
+
+
+def test_gpu_failure_returns_fixed_category_without_private_details(monkeypatch):
+    secret = "private-token-or-another-visitors-input"
+    def unavailable(*args):
+        raise RuntimeError("GPU quota exceeded " + secret)
+    monkeypatch.setattr(app, "_gpu_task", unavailable)
+    output = app.run_task("Convert a speed", 3, [])
+    assert "GPU_QUOTA" in output[2]
+    assert secret not in str(output)
+    assert output[4][0]["status"] == "failed"
+
+
+def test_successful_gpu_request_keeps_the_real_task_path(monkeypatch):
+    expected = ("answer", "evidence", "status", [], [], [])
+    calls = []
+    def gpu(*args):
+        calls.append(args)
+        return expected
+    monkeypatch.setattr(app, "_gpu_task", gpu)
+    assert app.run_task("A technical task", 3, []) == expected
+    assert len(calls) == 1

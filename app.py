@@ -1,5 +1,6 @@
 """NeuroForge AI: a genuine ZeroGPU model with a session-scoped workspace."""
 import os
+from functools import wraps
 from pathlib import Path
 
 # Import before Torch/Transformers so ZeroGPU can install its CUDA hooks.
@@ -9,6 +10,7 @@ import gradio as gr
 from neuroforge.agent import NeuroForgeAgent, evidence_summary
 from neuroforge.llm import LocalModel, DEFAULT_MODEL
 from neuroforge.memory import add_run
+from neuroforge.schemas import AgentResponse, TraceEvent
 
 os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 
@@ -42,11 +44,57 @@ def present_run(goal, max_steps, history, model):
 
 
 @spaces.GPU(duration=90)
-def run_task(goal: str, max_steps: int, history: list):
+def _gpu_task(goal: str, max_steps: int, history: list):
     """Run the local language model and validated tools on shared ZeroGPU."""
     if _BACKEND is None:
         raise RuntimeError("Start app.py to load the local model before inference.")
     return present_run(goal, max_steps, history, _BACKEND)
+
+
+def runtime_error_category(error):
+    """Map only known SDK conditions to fixed public messages; never return logs."""
+    text = (str(getattr(error, "title", "")) + " " + str(error)).lower()
+    if "quota" in text or "runs limit" in text or "gpu limit" in text:
+        return "GPU_QUOTA", "The shared GPU allowance is currently exhausted. Try after your Hugging Face quota resets."
+    if "illegal duration" in text or "requested duration" in text:
+        return "GPU_DURATION", "The requested GPU duration exceeds the allowance available for this run."
+    if "internal gradio" in text:
+        return "GPU_REQUEST_CONTEXT", "The GPU service could not read this Gradio request."
+    if "proxy token" in text or "unauthorized" in text or "authentication" in text:
+        return "GPU_AUTH", "Hugging Face could not authorise this GPU allocation. Refresh the page and try again."
+    if "queue" in text or "timeout" in text:
+        return "GPU_QUEUE", "A shared GPU did not become available in time. Try again later."
+    if "typeerror" in text or isinstance(error, TypeError):
+        return "GPU_WORKER_TYPE", "The GPU worker encountered a runtime compatibility error."
+    if "modulenotfound" in text or "importerror" in text:
+        return "GPU_WORKER_IMPORT", "The GPU worker could not load a runtime dependency."
+    if "cuda" in text:
+        return "GPU_CUDA", "The allocated GPU could not initialise model inference."
+    if "aborted" in text:
+        return "GPU_ABORTED", "The GPU task was interrupted before it completed."
+    if "schedule" in text:
+        return "GPU_SCHEDULER", "Hugging Face could not schedule this GPU request."
+    if "attributeerror" in text or isinstance(error, AttributeError):
+        return "GPU_WORKER_ATTRIBUTE", "The GPU worker encountered a runtime compatibility error."
+    if "worker error" in text:
+        return "GPU_WORKER", "The GPU worker could not initialise the model request."
+    return "GPU_UNAVAILABLE", "The GPU request could not start. Try again later."
+
+
+@wraps(_gpu_task)
+def run_task(goal: str, max_steps: int, history: list):
+    # wraps preserves the SDK's ZeroGPU marker on the registered event handler.
+    # Successful requests still execute the genuine GPU-decorated model task.
+    try:
+        return _gpu_task(goal, max_steps, history)
+    except Exception as error:
+        code, message = runtime_error_category(error)
+        result = AgentResponse(
+            goal=str(goal)[:2000], answer=message, status="failed", steps=0,
+            trace=[TraceEvent(step=0, event="model_error", detail=code)],
+        )
+        updated = add_run(history, result)
+        return message, "No tool ran.", f"GPU unavailable · {code}", [result.trace[0].model_dump(exclude_none=True)], updated, updated
 
 
 def create_demo():
