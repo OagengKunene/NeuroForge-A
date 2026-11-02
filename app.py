@@ -1,102 +1,149 @@
-"""Gradio front end for NeuroForge AI."""
+"""NeuroForge AI: a genuine ZeroGPU model with a session-scoped workspace."""
 import os
+from pathlib import Path
 
+# Import before Torch/Transformers so ZeroGPU can install its CUDA hooks.
+import spaces
 import gradio as gr
-from dotenv import load_dotenv
 
-load_dotenv()
+from neuroforge.agent import NeuroForgeAgent, evidence_summary
+from neuroforge.llm import LocalModel, DEFAULT_MODEL
+from neuroforge.memory import add_run
 
-MODEL_NAME = os.getenv("HF_MODEL", "Qwen/Qwen2.5-7B-Instruct")
+os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
+
+# Executed at startup, before Gradio registers GPU handlers. Unit tests import
+# the module without loading several GB of model weights.
+_BACKEND = LocalModel() if __name__ == "__main__" else None
 
 
-def run_task(goal: str, max_steps: int):
-    if not goal or len(goal.strip()) < 3:
-        return "Please enter a task with at least three characters.", [], "Not started"
+def present_run(goal, max_steps, history, model):
+    history = history or []
     try:
-        from neuroforge.agent import NeuroForgeAgent
-
-        result = NeuroForgeAgent(max_steps=int(max_steps)).run(goal.strip())
-        trace = [event.model_dump() for event in result.trace]
-        return result.answer, trace, f"Completed · Run #{result.run_id} · {result.steps} agent steps"
-    except Exception as exc:
-        return f"**Execution failed:** {type(exc).__name__}: {exc}", [], "Failed"
-
-
-def load_history():
-    try:
-        from neuroforge.memory import recent_runs
-        return recent_runs()
-    except Exception as exc:
-        return [{"error": f"{type(exc).__name__}: {exc}"}]
-
-
-with gr.Blocks(title="NeuroForge AI", theme=gr.themes.Soft()) as demo:
-    gr.Markdown(
-        "# 🧠 NeuroForge AI\n"
-        "### Autonomous technical problem-solving powered by Hugging Face models\n"
-        "Describe a task. NeuroForge can select from a small, validated toolset, "
-        "execute calculations, and show its execution trace."
+        result = NeuroForgeAgent(model=model, max_steps=max_steps).run(goal)
+    except ValueError:
+        return (
+            "Enter a task of 3–2,000 characters and choose 1–6 model calls.",
+            "No tool has run.", "Not started", [], history, history,
+        )
+    trace = [event.model_dump(exclude_none=True) for event in result.trace]
+    observations = [
+        {"tool": event.tool, "result": event.result}
+        for event in result.trace if event.event == "tool"
+    ]
+    verified = evidence_summary(observations) if observations else "No tools were executed in this run."
+    updated = add_run(history, result)
+    labels = {"completed": "Completed", "step_limit": "Call limit reached", "failed": "Failed"}
+    status = (
+        f"{labels[result.status]} · {result.steps} model calls · "
+        f"{len(observations)} verified tool results · {result.elapsed_seconds:g}s"
     )
+    return result.answer, verified, status, trace, updated, updated
 
-    with gr.Row():
-        with gr.Column(scale=3):
-            goal = gr.Textbox(
-                label="Your task",
-                placeholder=(
-                    "Example: Calculate the energy stored in a 0.22 F capacitor "
-                    "charged to 5.5 V, and explain the engineering significance."
-                ),
-                lines=5,
-            )
-            max_steps = gr.Slider(
-                minimum=1, maximum=8, value=4, step=1,
-                label="Maximum agent steps",
-            )
-            run_button = gr.Button("Run NeuroForge", variant="primary")
-        with gr.Column(scale=2):
-            gr.Markdown("### Model")
-            gr.Markdown(f"`{MODEL_NAME}`")
-            gr.Markdown(
-                "**Available tools**\n"
-                "- Calculator\n"
-                "- Unit conversion\n"
-                "- Text analysis\n\n"
-                "**Safety**\n"
-                "The model cannot execute arbitrary Python, shell commands, "
-                "or unrestricted external actions."
-            )
 
-    answer = gr.Markdown(label="Agent response")
-    status = gr.Textbox(label="Run status", interactive=False)
-    with gr.Accordion("Execution trace", open=True):
-        trace = gr.JSON(label="Trace events")
+@spaces.GPU(duration=90)
+def run_task(goal: str, max_steps: int, history: list):
+    """Run the local language model and validated tools on shared ZeroGPU."""
+    if _BACKEND is None:
+        raise RuntimeError("Start app.py to load the local model before inference.")
+    return present_run(goal, max_steps, history, _BACKEND)
 
-    run_button.click(
-        fn=run_task,
-        inputs=[goal, max_steps],
-        outputs=[answer, trace, status],
-    )
-    goal.submit(
-        fn=run_task,
-        inputs=[goal, max_steps],
-        outputs=[answer, trace, status],
-    )
 
-    with gr.Accordion("Recent run history", open=False):
-        refresh = gr.Button("Refresh history")
-        history = gr.JSON(label="Recent runs")
-        refresh.click(fn=load_history, inputs=[], outputs=[history])
-
-    gr.Markdown(
-        "---\n"
-        "*NeuroForge is a research prototype. Verify technical outputs "
-        "before relying on them. Run history is stored in the Space's local "
-        "SQLite filesystem and may not survive a Space restart.*"
-    )
+def create_demo():
+    with gr.Blocks(title="NeuroForge AI", analytics_enabled=False, delete_cache=(300, 3600)) as demo:
+        session_history = gr.State(value=list, time_to_live=3600)
+        gr.HTML("""
+        <section id="nf-hero">
+          <div class="nf-eyebrow">KUNENE / AI ENGINEERING LAB</div>
+          <h1>NeuroForge AI<span>.</span></h1>
+          <p>Think it through. Check the numbers.</p>
+          <div class="nf-badges"><span>Local model inference</span><span>Shared ZeroGPU</span><span>Observable tool use</span></div>
+        </section>
+        """)
+        with gr.Row(equal_height=False):
+            with gr.Column(scale=3):
+                gr.Markdown("### What are we working on?")
+                goal = gr.Textbox(
+                    label="Your task",
+                    placeholder="Calculate capacitor energy, convert engineering units, or analyse a short passage.",
+                    lines=5, max_lines=10, max_length=2000,
+                )
+                with gr.Row():
+                    max_steps = gr.Slider(
+                        minimum=1, maximum=6, value=3, step=1, precision=0,
+                        label="Maximum model calls",
+                        info="Three calls usually allow a calculation and an explanation.",
+                    )
+                run_button = gr.Button("Run NeuroForge →", variant="primary", elem_id="nf-run")
+                gr.Examples(
+                    examples=[
+                        ["Calculate the energy stored in a 0.22 F capacitor charged to 5.5 V. Use E = 0.5 * C * V^2 and report joules.", 3],
+                        ["Convert 72 km/h to m/s and explain the result.", 3],
+                        ["Count the words and sentences in: NeuroForge builds useful tools. Tests matter!", 3],
+                    ],
+                    inputs=[goal, max_steps], cache_examples=False, label="Start with an example",
+                )
+            with gr.Column(scale=2):
+                gr.HTML("""
+                <aside id="nf-toolkit">
+                  <div class="nf-eyebrow">YOUR TOOLKIT</div>
+                  <h2>A result you can inspect.</h2>
+                  <div class="nf-tool"><strong>01 / Calculator</strong><p>Bounded arithmetic with finite, real results.</p></div>
+                  <div class="nf-tool"><strong>02 / Unit conversion</strong><p>Engineering units with dimension checks.</p></div>
+                  <div class="nf-tool"><strong>03 / Text analysis</strong><p>Word, sentence, and character statistics.</p></div>
+                </aside>
+                """)
+                model_name = os.getenv("NEUROFORGE_MODEL", DEFAULT_MODEL)
+                gr.Markdown(f"**Model** · {model_name}")
+                gr.Markdown(
+                    "Runs use a shared GPU. Queue waits and daily Hugging Face quotas apply. "
+                    "A run can use up to 90 GPU seconds."
+                )
+        status = gr.Textbox(label="Run status", value="Ready", interactive=False)
+        with gr.Row(equal_height=False):
+            with gr.Column(scale=3):
+                gr.Markdown("### Model response")
+                answer = gr.Markdown("Your response will appear here after a run.", elem_id="nf-answer")
+            with gr.Column(scale=2):
+                gr.Markdown("### Verified tool evidence")
+                evidence = gr.Markdown("No tool has run.", elem_id="nf-evidence")
+        with gr.Accordion("Execution trace · tool inputs, outputs, and errors", open=False):
+            trace = gr.JSON(value=[], label="Observable events")
+        with gr.Accordion("Recent runs · this session only", open=False):
+            history_view = gr.JSON(value=[], label="Up to 10 recent runs")
+            clear = gr.Button("Clear this session", variant="secondary")
+        gr.Markdown(
+            "History is kept in this browser session's server state, expires after one hour, "
+            "and resets on refresh. Technical answers can be wrong; compare the explanation "
+            "with the verified tool outputs."
+        )
+        inputs = [goal, max_steps, session_history]
+        outputs = [answer, evidence, status, trace, session_history, history_view]
+        run_button.click(
+            fn=run_task, inputs=inputs, outputs=outputs,
+            api_name="run_task", concurrency_limit=1, concurrency_id="nf-gpu",
+        )
+        goal.submit(
+            fn=run_task, inputs=inputs, outputs=outputs,
+            api_name="run_task_enter", concurrency_limit=1, concurrency_id="nf-gpu",
+        )
+        clear.click(
+            fn=lambda: ("Your response will appear here after a run.", "No tool has run.", "Ready", [], [], []),
+            inputs=[], outputs=outputs, queue=False, api_visibility="private",
+        )
+    return demo
 
 
 if __name__ == "__main__":
-    demo.launch(
+    demo = create_demo()
+    demo.queue(max_size=12, default_concurrency_limit=1).launch(
         server_name="0.0.0.0",
-        server_port=int(os.environ.get("PORT", "7860")),
+        server_port=int(os.getenv("PORT", "7860")),
+        theme=gr.themes.Soft(primary_hue="blue", neutral_hue="slate"),
+        css_paths=Path(__file__).parent / "assets" / "style.css",
+        ssr_mode=False,
+        run_history=False,
+        footer_links=["api"],
+        show_error=False,
     )
+

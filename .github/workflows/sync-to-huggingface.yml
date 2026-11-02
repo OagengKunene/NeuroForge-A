@@ -8,50 +8,40 @@ name: Sync to Hugging Face Space
 permissions:
   contents: read
 
+concurrency:
+  group: neuroforge-huggingface
+  cancel-in-progress: true
+
 jobs:
+  verify:
+    uses: ./.github/workflows/tests.yml
+
   sync:
+    needs: verify
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - name: Check out GitHub repository
         uses: actions/checkout@v6
-
       - name: Set up Python
         uses: actions/setup-python@v7.1.0
         with:
-          python-version: "3.11"
-
+          python-version: "3.12"
       - name: Install the Hugging Face client
         run: python -m pip install --disable-pip-version-check "huggingface_hub==2.4.0"
-
-      - name: Use CPU Basic for hosted model inference
+      - name: Confirm ZeroGPU configuration
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
           python - <<'PY'
-          from huggingface_hub import HfApi, SpaceHardware
-          from huggingface_hub.utils import HfHubHTTPError
-
-          api = HfApi()
-          space = "Oageng/NeuroForge-AI"
-          try:
-              runtime = api.get_space_runtime(repo_id=space)
-              requested = runtime.requested_hardware or runtime.hardware
-              if requested != SpaceHardware.CPU_BASIC:
-                  runtime = api.request_space_hardware(
-                      repo_id=space, hardware=SpaceHardware.CPU_BASIC
-                  )
-              print(f"Requested hardware: {runtime.requested_hardware or runtime.hardware}")
-          except HfHubHTTPError as exc:
-              status = exc.response.status_code if exc.response is not None else None
-              if status == 402:
-                  raise SystemExit(
-                      "Hugging Face requires an eligible subscription for this "
-                      "Gradio Space on CPU Basic. No paid hardware was requested."
-                  ) from None
-              raise
+          from huggingface_hub import HfApi
+          runtime = HfApi().get_space_runtime("Oageng/NeuroForge-AI")
+          hardware = runtime.requested_hardware or runtime.hardware
+          if hardware != "zero-a10g":
+              raise SystemExit("Select ZeroGPU for Oageng/NeuroForge-AI before publishing.")
+          print("ZeroGPU configuration confirmed. No hardware upgrade requested.")
           PY
-
       - name: Sync repository to Hugging Face Space
         uses: huggingface/hub-sync@v0.3.0
         with:
@@ -59,3 +49,28 @@ jobs:
           huggingface_repo_id: Oageng/NeuroForge-AI
           hf_token: ${{ secrets.HF_TOKEN }}
           space_sdk: gradio
+      - name: Wait for the Space to start
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          python - <<'PY'
+          import time
+          from collections import deque
+          from huggingface_hub import HfApi
+          api = HfApi()
+          space = "Oageng/NeuroForge-AI"
+          time.sleep(20)
+          try:
+              runtime = api.wait_for_space(space, timeout=1000, poll_interval=15)
+              print(f"Space state: {runtime.stage}")
+          except Exception:
+              for build in (True, False):
+                  print("Build logs:" if build else "Runtime logs:")
+                  try:
+                      for line in deque(api.fetch_space_logs(space, build=build), maxlen=60):
+                          print(line, end="")
+                  except Exception as error:
+                      print(f"Logs unavailable: {type(error).__name__}")
+              raise
+          PY
+

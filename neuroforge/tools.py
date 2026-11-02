@@ -1,5 +1,6 @@
 """Small allow-listed tools. No arbitrary code or shell execution."""
 import ast
+import math
 import operator
 import re
 from typing import Any
@@ -12,19 +13,32 @@ _ALLOWED_BINOPS = {
 _ALLOWED_UNARY = {ast.UAdd: operator.pos, ast.USub: operator.neg}
 
 
+def _finite_number(value, limit=1e15):
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError("Only real numeric values are supported.")
+    try:
+        number = float(value)
+    except (ValueError, OverflowError) as exc:
+        raise ValueError("Value is outside the supported numeric range.") from exc
+    if not math.isfinite(number) or abs(number) > limit:
+        raise ValueError(f"Value must be finite and within ±{limit:g}.")
+    return number
+
+
 def _eval_node(node: ast.AST) -> float:
     if isinstance(node, ast.Expression):
         return _eval_node(node.body)
     if isinstance(node, ast.Constant) and isinstance(node.value, (int, float)) and not isinstance(node.value, bool):
-        return float(node.value)
+        return _finite_number(node.value)
     if isinstance(node, ast.BinOp) and type(node.op) in _ALLOWED_BINOPS:
         left, right = _eval_node(node.left), _eval_node(node.right)
         if isinstance(node.op, ast.Pow) and abs(right) > 8:
             raise ValueError("Exponent magnitude is limited to 8.")
-        result = _ALLOWED_BINOPS[type(node.op)](left, right)
-        if abs(result) > 1e15:
-            raise ValueError("Result exceeds the permitted magnitude.")
-        return result
+        try:
+            result = _ALLOWED_BINOPS[type(node.op)](left, right)
+        except (ArithmeticError, ValueError) as exc:
+            raise ValueError("Expression has no supported finite real result.") from exc
+        return _finite_number(result)
     if isinstance(node, ast.UnaryOp) and type(node.op) in _ALLOWED_UNARY:
         return _ALLOWED_UNARY[type(node.op)](_eval_node(node.operand))
     raise ValueError("Only numeric constants and +, -, *, /, %, **, and parentheses are allowed.")
@@ -55,8 +69,9 @@ _UNIT_TABLE = {
 
 def unit_convert(value: float, from_unit: str, to_unit: str) -> dict[str, Any]:
     """Convert between supported units in the same physical dimension."""
-    if not isinstance(value, (int, float)) or isinstance(value, bool) or abs(value) > 1e12:
-        raise ValueError("Value must be numeric and within ±1e12.")
+    value = _finite_number(value, 1e12)
+    if not isinstance(from_unit, str) or not isinstance(to_unit, str):
+        raise ValueError("Unit names must be strings.")
     source, target = from_unit.lower().strip(), to_unit.lower().strip()
     if source not in _UNIT_TABLE or target not in _UNIT_TABLE:
         raise ValueError("Unsupported unit. Supported units: " + ", ".join(_UNIT_TABLE))
@@ -64,7 +79,7 @@ def unit_convert(value: float, from_unit: str, to_unit: str) -> dict[str, Any]:
     target_dim, target_factor = _UNIT_TABLE[target]
     if source_dim != target_dim:
         raise ValueError("Units belong to different physical dimensions.")
-    converted = float(value) * source_factor / target_factor
+    converted = _finite_number(value * source_factor / target_factor)
     return {"value": value, "from": source, "to": target, "result": converted}
 
 
@@ -103,3 +118,4 @@ def execute_tool(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
     if set(arguments) != required:
         raise ValueError(f"{name} requires exactly these arguments: {sorted(required)}")
     return TOOL_REGISTRY[name](**arguments)
+

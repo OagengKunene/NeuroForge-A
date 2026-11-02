@@ -30,3 +30,21 @@ def test_text_analysis():
 def test_tool_arguments_are_exact():
     with pytest.raises(ValueError):
         execute_tool("calculator", {"expression": "1+1", "extra": "no"})
+
+
+@pytest.mark.parametrize("expression", ["1e999", "1e999-1e999", "(-1)**0.5", "1/0", "10**9", "1e15*2"])
+def test_calculator_rejects_nonfinite_complex_or_oversized_results(expression):
+    with pytest.raises(ValueError):
+        calculator(expression)
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), True, "12", 1e13])
+def test_unit_conversion_rejects_invalid_numeric_values(value):
+    with pytest.raises(ValueError):
+        unit_convert(value, "km", "m")
+
+
+def test_unit_conversion_rejects_invalid_unit_types():
+    with pytest.raises(ValueError):
+        unit_convert(1, None, "m")
+
